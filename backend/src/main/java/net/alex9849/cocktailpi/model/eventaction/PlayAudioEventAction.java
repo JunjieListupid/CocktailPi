@@ -59,7 +59,6 @@ public class PlayAudioEventAction extends FileEventAction {
             }
 
             setClipListener(clip, syncLatch);
-            openAudioStream(clip);
             setVolume(clip);
             playClip(clip, syncLatch);
         } catch (Exception e) {
@@ -93,11 +92,6 @@ public class PlayAudioEventAction extends FileEventAction {
                 syncLatch.countDown();
             }
         });
-    }
-
-    private void openAudioStream(Clip clip) throws IOException, UnsupportedAudioFileException, LineUnavailableException {
-        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(getFile()));
-        clip.open(audioInputStream);
     }
 
     private void setVolume(Clip clip) {

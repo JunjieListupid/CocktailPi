@@ -133,7 +133,7 @@ public class FeasibilityFactory {
         AddableIngredient addableIngredient = orderConfiguration.getReplacement(stepIndex, psIngredient.getIngredient().getId());
 
         if (addableIngredient != null) {
-            validateReplacement(toReplaceIngredientGroup, addableIngredient);
+
             feasibleProductionStepIngredient.setIngredient(addableIngredient);
             ingredientGroupReplacement.setSelectedReplacement(addableIngredient);
         } else {
@@ -145,12 +145,7 @@ public class FeasibilityFactory {
         return ingredientGroupReplacement;
     }
 
-    private void validateReplacement(IngredientGroup toReplaceIngredientGroup, AddableIngredient addableIngredient) {
-        if (toReplaceIngredientGroup.getAddableIngredientChildren().stream()
-                .noneMatch(x -> x.getId() == addableIngredient.getId())) {
-            throw new IllegalArgumentException(toReplaceIngredientGroup.getName() + " can't be replaced with " + addableIngredient.getName());
-        }
-    }
+
 
     private AddIngredientsProductionStep createFeasibleAddIngredientsProductionStep(Map<Long, ProductionStepIngredient> existingProductionStepsByIngredientId) {
         AddIngredientsProductionStep feasibleAIPSStep = new AddIngredientsProductionStep();

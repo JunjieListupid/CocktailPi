@@ -39,30 +39,7 @@ public class UserEndpoint {
         return ResponseEntity.created(uriComponents.toUri()).build();
     }
 
-    @RequestMapping(value = {"{id}", "current"}, method = RequestMethod.PUT)
-    public ResponseEntity<?> updateUser(@PathVariable(value = "id", required = false) Long userId,
-                                        @Valid @RequestBody UpdateUserRequest updateUserRequest) {
-        User principal = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        try {
-            userId = getUserIdToUpdate(userId, principal);
-            checkAdminPermissions(principal, userId);
 
-            User beforeUpdate = userService.getUser(userId);
-            if (beforeUpdate == null) {
-                return ResponseEntity.notFound().build();
-            }
-
-            User updateUser = prepareUserForUpdate(updateUserRequest, userId, beforeUpdate);
-            checkSelfEditRestrictions(principal, userId, updateUser, beforeUpdate);
-
-            setUserPassword(updateUser, beforeUpdate, updateUserRequest.isUpdatePassword());
-
-            User updatedUser = userService.updateUser(updateUser, updateUserRequest.isUpdatePassword());
-            return ResponseEntity.ok(new UserDto.Response.Detailed(updatedUser));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
-        }
-    }
 
     private Long getUserIdToUpdate(Long userId, User principal) {
         if (userId == null) {
@@ -77,13 +54,7 @@ public class UserEndpoint {
         }
     }
 
-    private User prepareUserForUpdate(UpdateUserRequest updateUserRequest, Long userId, User beforeUpdate) {
-        User updateUser = userService.fromDto(updateUserRequest.getUserDto());
-        updateUser.setId(userId);
-        updateUser.setAuthority(beforeUpdate.getAuthority());
-        updateUser.setAccountNonLocked(beforeUpdate.isAccountNonLocked());
-        return updateUser;
-    }
+
 
     private void checkSelfEditRestrictions(User principal, Long userId, User updateUser, User beforeUpdate) {
         if (principal.getId()!=(userId)) {
