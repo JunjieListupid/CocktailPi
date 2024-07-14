@@ -4,6 +4,7 @@ import jakarta.persistence.DiscriminatorValue;
 
 import javax.sound.sampled.*;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 
@@ -52,51 +53,76 @@ public class PlayAudioEventAction extends FileEventAction {
         Clip clip = null;
 
         try {
-            Line.Info sourceInfo = new Line.Info(SourceDataLine.class);
-            for(Mixer.Info info : AudioSystem.getMixerInfo()) {
-                Mixer mixer = AudioSystem.getMixer(info);
-                if(!mixer.isLineSupported((sourceInfo))) {
-                    continue;
-                }
-                if(!Objects.equals(mixer.getMixerInfo().getName(), this.soundDevice)) {
-                    continue;
-                }
-                clip = AudioSystem.getClip(info);
-            }
-            if(clip == null) {
+            clip = getClipForSoundDevice();
+            if (clip == null) {
                 throw new IllegalStateException("Sound device \"" + this.soundDevice + "\" not found!");
             }
 
-            clip.addLineListener(e -> {
-                if (e.getType() == LineEvent.Type.STOP) {
-                    syncLatch.countDown();
-                }
-            });
-            AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(getFile()));
-            clip.open(audioInputStream);
-            clip.loop(onRepeat? Clip.LOOP_CONTINUOUSLY : 0);
-            FloatControl floatControl = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
-            if(floatControl != null) {
-                float volume = ((floatControl.getMaximum() - floatControl.getMinimum()) / 100 * this.volume) + floatControl.getMinimum();
-                volume = Math.min(volume, floatControl.getMaximum());
-                volume = Math.max(volume, floatControl.getMinimum());
-                floatControl.setValue(volume);
-            }
-            clip.start();
-            syncLatch.await();
-        } catch (InterruptedException e) {
-            if(clip != null) {
-                clip.stop();
-                clip.close();
-            }
+            setClipListener(clip, syncLatch);
+            openAudioStream(clip);
+            setVolume(clip);
+            playClip(clip, syncLatch);
         } catch (Exception e) {
-            e.printStackTrace();
-            runningAction.addLog(e);
+            handleExceptions(clip, e, runningAction);
         } finally {
-            if(clip != null) {
+            if (clip != null) {
                 clip.stop();
                 clip.close();
             }
         }
     }
+
+    private Clip getClipForSoundDevice() throws LineUnavailableException {
+        Line.Info sourceInfo = new Line.Info(SourceDataLine.class);
+        for (Mixer.Info info : AudioSystem.getMixerInfo()) {
+            Mixer mixer = AudioSystem.getMixer(info);
+            if (!mixer.isLineSupported(sourceInfo)) {
+                continue;
+            }
+            if (!Objects.equals(mixer.getMixerInfo().getName(), this.soundDevice)) {
+                continue;
+            }
+            return AudioSystem.getClip(info);
+        }
+        return null;
+    }
+
+    private void setClipListener(Clip clip, CountDownLatch syncLatch) {
+        clip.addLineListener(e -> {
+            if (e.getType() == LineEvent.Type.STOP) {
+                syncLatch.countDown();
+            }
+        });
+    }
+
+    private void openAudioStream(Clip clip) throws IOException, UnsupportedAudioFileException, LineUnavailableException {
+        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(getFile()));
+        clip.open(audioInputStream);
+    }
+
+    private void setVolume(Clip clip) {
+        FloatControl floatControl = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+        if (floatControl != null) {
+            float volume = ((floatControl.getMaximum() - floatControl.getMinimum()) / 100 * this.volume) + floatControl.getMinimum();
+            volume = Math.min(volume, floatControl.getMaximum());
+            volume = Math.max(volume, floatControl.getMinimum());
+            floatControl.setValue(volume);
+        }
+    }
+
+    private void playClip(Clip clip, CountDownLatch syncLatch) throws InterruptedException {
+        clip.loop(onRepeat ? Clip.LOOP_CONTINUOUSLY : 0);
+        clip.start();
+        syncLatch.await();
+    }
+
+    private void handleExceptions(Clip clip, Exception e, RunningAction runningAction) {
+        e.printStackTrace();
+        runningAction.addLog(e);
+        if (clip != null) {
+            clip.stop();
+            clip.close();
+        }
+    }
+
 }

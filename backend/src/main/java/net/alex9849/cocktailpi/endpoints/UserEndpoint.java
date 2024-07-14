@@ -40,41 +40,70 @@ public class UserEndpoint {
     }
 
     @RequestMapping(value = {"{id}", "current"}, method = RequestMethod.PUT)
-    public ResponseEntity<?> updateUser(@PathVariable(value = "id", required = false) Long userId, @Valid @RequestBody UpdateUserRequest updateUserRequest) {
+    public ResponseEntity<?> updateUser(@PathVariable(value = "id", required = false) Long userId,
+                                        @Valid @RequestBody UpdateUserRequest updateUserRequest) {
         User principal = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        User updateUser = userService.fromDto(updateUserRequest.getUserDto());
-        if(userId == null) {
-            userId = principal.getId();
-        } else {
-            if(!principal.getAuthorities().contains(ERole.ROLE_ADMIN)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        try {
+            userId = getUserIdToUpdate(userId, principal);
+            checkAdminPermissions(principal, userId);
+
+            User beforeUpdate = userService.getUser(userId);
+            if (beforeUpdate == null) {
+                return ResponseEntity.notFound().build();
             }
+
+            User updateUser = prepareUserForUpdate(updateUserRequest, userId, beforeUpdate);
+            checkSelfEditRestrictions(principal, userId, updateUser, beforeUpdate);
+
+            setUserPassword(updateUser, beforeUpdate, updateUserRequest.isUpdatePassword());
+
+            User updatedUser = userService.updateUser(updateUser, updateUserRequest.isUpdatePassword());
+            return ResponseEntity.ok(new UserDto.Response.Detailed(updatedUser));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
         }
-        updateUser.setId(userId);
-        User beforeUpdate = userService.getUser(userId);
-        if(beforeUpdate == null) {
-            return ResponseEntity.notFound().build();
-        }
-        if(principal.getAuthorities().contains(ERole.ROLE_ADMIN)) {
-            if(principal.getId() == userId) {
-                if(updateUser.getAuthority() != beforeUpdate.getAuthority()) {
-                    throw new IllegalArgumentException("You can't edit your own role!");
-                }
-                if(updateUser.isAccountNonLocked() != beforeUpdate.isAccountNonLocked()) {
-                    throw new IllegalArgumentException("You can't lock / unlock yourself!");
-                }
-            }
-        } else {
-            updateUser.setAuthority(beforeUpdate.getAuthority());
-            updateUser.setAccountNonLocked(beforeUpdate.isAccountNonLocked());
-        }
-        //If user wants to update his password update it. Otherwise fill in the old encrypted password
-        if(!updateUserRequest.isUpdatePassword()) {
-            updateUser.setPassword(beforeUpdate.getPassword());
-        }
-        return ResponseEntity.ok(new UserDto.Response.Detailed(userService.updateUser(updateUser, updateUserRequest.isUpdatePassword())));
     }
 
+    private Long getUserIdToUpdate(Long userId, User principal) {
+        if (userId == null) {
+            return principal.getId();
+        }
+        return userId;
+    }
+
+    private void checkAdminPermissions(User principal, Long userId) {
+        if (!principal.getAuthorities().contains(ERole.ROLE_ADMIN) && principal.getId() != (userId)) {
+            throw new IllegalArgumentException("Admin permissions required");
+        }
+    }
+
+    private User prepareUserForUpdate(UpdateUserRequest updateUserRequest, Long userId, User beforeUpdate) {
+        User updateUser = userService.fromDto(updateUserRequest.getUserDto());
+        updateUser.setId(userId);
+        updateUser.setAuthority(beforeUpdate.getAuthority());
+        updateUser.setAccountNonLocked(beforeUpdate.isAccountNonLocked());
+        return updateUser;
+    }
+
+    private void checkSelfEditRestrictions(User principal, Long userId, User updateUser, User beforeUpdate) {
+        if (principal.getId()!=(userId)) {
+            if (!principal.getAuthorities().contains(ERole.ROLE_ADMIN)) {
+                throw new IllegalArgumentException("You can't edit your own role or lock/unlock yourself!");
+            }
+            if (!updateUser.getAuthority().equals(beforeUpdate.getAuthority())) {
+                throw new IllegalArgumentException("You can't edit your own role!");
+            }
+            if (updateUser.isAccountNonLocked() != beforeUpdate.isAccountNonLocked()) {
+                throw new IllegalArgumentException("You can't lock/unlock yourself!");
+            }
+        }
+    }
+
+    private void setUserPassword(User updateUser, User beforeUpdate, boolean updatePassword) {
+        if (!updatePassword) {
+            updateUser.setPassword(beforeUpdate.getPassword());
+        }
+    }
 
 
     @PreAuthorize("hasRole('ADMIN')")

@@ -77,69 +77,92 @@ public class FeasibilityFactory {
         boolean allIngredientGroupsReplaced = true;
         List<List<FeasibilityReport.IngredientGroupReplacement>> ingredientGroupReplacements = new ArrayList<>();
         List<ProductionStep> feasibleProductionSteps = new ArrayList<>();
+
         for (int i = 0; i < recipe.getProductionSteps().size(); i++) {
             ProductionStep productionStep = recipe.getProductionSteps().get(i);
+
             if (!(productionStep instanceof AddIngredientsProductionStep)) {
                 feasibleProductionSteps.add(productionStep);
                 continue;
             }
 
-            //Used to create the feasibilityReport
             List<FeasibilityReport.IngredientGroupReplacement> stepIngredientGroupReplacements = new ArrayList<>();
             ingredientGroupReplacements.add(stepIngredientGroupReplacements);
 
-            //The productionStep that should be added to the feasibleRecipe
             AddIngredientsProductionStep aipStep = (AddIngredientsProductionStep) productionStep;
-            //Stores existing productionSteps by the ingredientId
             Map<Long, ProductionStepIngredient> existingProductionStepsByIngredientId = new HashMap<>();
 
             for (ProductionStepIngredient psIngredient : aipStep.getStepIngredients()) {
-                ProductionStepIngredient feasibleProductionStepIngredient = new ProductionStepIngredient();
-                feasibleProductionStepIngredient.setAmount(psIngredient.getAmount());
-                feasibleProductionStepIngredient.setScale(false);
+                ProductionStepIngredient feasibleProductionStepIngredient = createFeasibleProductionStepIngredient(psIngredient);
 
-                //We only replace IngredientGroups
                 if (!(psIngredient.getIngredient() instanceof IngredientGroup)) {
-                    feasibleProductionStepIngredient.setIngredient(psIngredient.getIngredient());
                     mergeWithExistingProductionStepIngredients(existingProductionStepsByIngredientId, feasibleProductionStepIngredient);
                     continue;
                 }
 
-                FeasibilityReport.IngredientGroupReplacement ingredientGroupReplacement = new FeasibilityReport.IngredientGroupReplacement();
-                IngredientGroup toReplaceIngredientGroup = (IngredientGroup) psIngredient.getIngredient();
-                ingredientGroupReplacement.setIngredientGroup(toReplaceIngredientGroup);
-                AddableIngredient addableIngredient = orderConfiguration.getReplacement(i, psIngredient.getIngredient().getId());
+                FeasibilityReport.IngredientGroupReplacement ingredientGroupReplacement = createIngredientGroupReplacement(i, psIngredient, feasibleProductionStepIngredient);
+                stepIngredientGroupReplacements.add(ingredientGroupReplacement);
 
-                if (addableIngredient != null) {
-                    if(toReplaceIngredientGroup.getAddableIngredientChildren().stream()
-                            .noneMatch(x -> x.getId() == addableIngredient.getId())) {
-                        throw new IllegalArgumentException(toReplaceIngredientGroup.getName()
-                                + " can't be replaced with " + addableIngredient.getName());
-                    }
-                    feasibleProductionStepIngredient.setIngredient(addableIngredient);
-                    ingredientGroupReplacement.setSelectedReplacement(addableIngredient);
-                } else {
-                    AddableIngredient autoSelectedReplacement = findIngredientGroupReplacement(toReplaceIngredientGroup, this.pumps);
-                    ingredientGroupReplacement.setSelectedReplacement(autoSelectedReplacement);
-                    if(autoSelectedReplacement != null) {
-                        feasibleProductionStepIngredient.setIngredient(autoSelectedReplacement);
-                    } else {
-                        allIngredientGroupsReplaced = false;
-                        feasibleProductionStepIngredient.setIngredient(toReplaceIngredientGroup);
-                    }
+                if (ingredientGroupReplacement.getSelectedReplacement() == null) {
+                    allIngredientGroupsReplaced = false;
                 }
 
-                stepIngredientGroupReplacements.add(ingredientGroupReplacement);
                 mergeWithExistingProductionStepIngredients(existingProductionStepsByIngredientId, feasibleProductionStepIngredient);
             }
-            AddIngredientsProductionStep feasibleAIPSStep = new AddIngredientsProductionStep();
-            feasibleAIPSStep.setStepIngredients(new ArrayList<>(existingProductionStepsByIngredientId.values()));
-            feasibleProductionSteps.add(feasibleAIPSStep);
+
+            feasibleProductionSteps.add(createFeasibleAddIngredientsProductionStep(existingProductionStepsByIngredientId));
         }
+
+        updateFeasibilityReport(allIngredientGroupsReplaced, ingredientGroupReplacements);
+        feasibleRecipe.setFeasibleProductionSteps(feasibleProductionSteps);
+    }
+
+    private ProductionStepIngredient createFeasibleProductionStepIngredient(ProductionStepIngredient psIngredient) {
+        ProductionStepIngredient feasibleProductionStepIngredient = new ProductionStepIngredient();
+        feasibleProductionStepIngredient.setAmount(psIngredient.getAmount());
+        feasibleProductionStepIngredient.setScale(false);
+        feasibleProductionStepIngredient.setIngredient(psIngredient.getIngredient());
+        return feasibleProductionStepIngredient;
+    }
+
+    private FeasibilityReport.IngredientGroupReplacement createIngredientGroupReplacement(int stepIndex, ProductionStepIngredient psIngredient, ProductionStepIngredient feasibleProductionStepIngredient) {
+        FeasibilityReport.IngredientGroupReplacement ingredientGroupReplacement = new FeasibilityReport.IngredientGroupReplacement();
+        IngredientGroup toReplaceIngredientGroup = (IngredientGroup) psIngredient.getIngredient();
+        ingredientGroupReplacement.setIngredientGroup(toReplaceIngredientGroup);
+
+        AddableIngredient addableIngredient = orderConfiguration.getReplacement(stepIndex, psIngredient.getIngredient().getId());
+
+        if (addableIngredient != null) {
+            validateReplacement(toReplaceIngredientGroup, addableIngredient);
+            feasibleProductionStepIngredient.setIngredient(addableIngredient);
+            ingredientGroupReplacement.setSelectedReplacement(addableIngredient);
+        } else {
+            AddableIngredient autoSelectedReplacement = findIngredientGroupReplacement(toReplaceIngredientGroup, this.pumps);
+            ingredientGroupReplacement.setSelectedReplacement(autoSelectedReplacement);
+            feasibleProductionStepIngredient.setIngredient(autoSelectedReplacement != null ? autoSelectedReplacement : toReplaceIngredientGroup);
+        }
+
+        return ingredientGroupReplacement;
+    }
+
+    private void validateReplacement(IngredientGroup toReplaceIngredientGroup, AddableIngredient addableIngredient) {
+        if (toReplaceIngredientGroup.getAddableIngredientChildren().stream()
+                .noneMatch(x -> x.getId() == addableIngredient.getId())) {
+            throw new IllegalArgumentException(toReplaceIngredientGroup.getName() + " can't be replaced with " + addableIngredient.getName());
+        }
+    }
+
+    private AddIngredientsProductionStep createFeasibleAddIngredientsProductionStep(Map<Long, ProductionStepIngredient> existingProductionStepsByIngredientId) {
+        AddIngredientsProductionStep feasibleAIPSStep = new AddIngredientsProductionStep();
+        feasibleAIPSStep.setStepIngredients(new ArrayList<>(existingProductionStepsByIngredientId.values()));
+        return feasibleAIPSStep;
+    }
+
+    private void updateFeasibilityReport(boolean allIngredientGroupsReplaced, List<List<FeasibilityReport.IngredientGroupReplacement>> ingredientGroupReplacements) {
         this.feasibilityReport.setAllIngredientGroupsReplaced(allIngredientGroupsReplaced);
-        this.feasibleRecipe.setFeasibleProductionSteps(feasibleProductionSteps);
         this.feasibilityReport.setIngredientGroupReplacements(ingredientGroupReplacements);
     }
+
 
     private void computeRequiredIngredients() {
         Map<Ingredient, Integer> neededAmountPerIngredientId = CocktailFactory.getNeededAmountNeededPerIngredient(this.feasibleRecipe);
